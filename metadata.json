@@ -1,0 +1,7 @@
+{
+  "name": "Voyager AI - Smart Travel Planner",
+  "description": "An AI-powered travel organizer inspired by TripIt. Simply tell the AI your travel plans, and it will automatically build a detailed itinerary, find destinations, and organize your trip using Google Search and Maps grounding.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
