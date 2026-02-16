@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { Trip, ChatMessage, GroundingLink, TripRequest } from "../types";
+import { UnsplashService } from "./unsplashService";
 
 const extractJson = (text: string) => {
   try {
@@ -105,15 +106,13 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
     
     1. Identify the MAIN destination.
     2. Translate the destination name to ENGLISH (e.g. 'Львів' -> 'Lviv').
-    3. Use the 'googleSearch' tool to find a HIGH-QUALITY, REAL photographic image URL for this destination.
-    4. Search query format: "[Destination Name] travel photography high resolution site:unsplash.com OR site:wikimedia.org OR site:pexels.com"
-    5. Select a direct image link ending in .jpg, .png, or starting with 'https://images.unsplash.com/'.
-    6. FORBIDDEN: Do NOT use 'source.unsplash.com' links.
+    3. The code will automatically fetch high-quality photos using the Unsplash API based on this English name.
+    4. You do NOT need to generate image URLs manually. Leave 'imageUrl' empty or providing a generic description.
     
     ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
-      tools: [{ googleSearch: {} }],
+      tools: [],
       responseMimeType: "application/json",
       responseSchema: tripSchema
     }
@@ -121,22 +120,35 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
   const tripData = extractJson(response.text);
   if (!tripData) throw new Error("Failed to generate trip plan.");
 
-  // Fallback behavior: Use AI provided URL. If missing/broken, use a safe default.
-  // We accept Unsplash direct links (images.unsplash.com) but reject source.unsplash.com
-  let finalImage = tripData.imageUrl;
+  // UNSPLASH API INTEGRATION
+  const mainDestination = tripData.destination || request.destinations[0] || "Travel";
 
-  const isValidUrl = (url: string) =>
-    url && url.includes('http') && !url.includes('source.unsplash.com');
+  // Clean query for Unsplash (English preferred)
+  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
+  const searchCheck = englishOnly.length > 2 ? englishOnly : mainDestination;
+  const searchQuery = searchCheck + " travel landmark";
 
-  if (!isValidUrl(finalImage)) {
-    // If AI failed to find a real link via search, use a generic reliable travel placeholder
-    // keeping it neutral so it doesn't look like a fake generated glitch
+  // Fetch cover image
+  let finalImage = await UnsplashService.searchPhoto(searchQuery);
+
+  // Fallback if Unsplash fails
+  if (!finalImage) {
     finalImage = `https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80`;
   }
 
-  // Filter gallery images
-  const finalDestImages = (tripData.destinationImages || [])
-    .filter((img: string) => isValidUrl(img));
+  // Fetch destination images (gallery)
+  let finalDestImages: string[] = [];
+  const destinationsToFetch = request.destinations.length > 0 ? request.destinations : [mainDestination];
+
+  // Fetch images in parallel for speed
+  const imagePromises = destinationsToFetch.map(async (dest) => {
+    const q = dest.replace(/[^a-zA-Z\s-]/g, '').trim();
+    const finalQ = (q.length > 2 ? q : dest) + " city travel";
+    return await UnsplashService.searchPhoto(finalQ);
+  });
+
+  const fetchedImages = await Promise.all(imagePromises);
+  finalDestImages = fetchedImages.filter((img): img is string => !!img);
 
   if (finalDestImages.length === 0) finalDestImages.push(finalImage);
 
@@ -180,8 +192,8 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
     contents: `Based on the conversation, generate a full JSON itinerary.
     
     CRITICAL IMAGE INSTRUCTION:
-    Use the dynamic image generator for 'imageUrl':
-    Format: "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20[DESTINATION_ENGLISH_NAME]%20landmark,%20sunny%20day?width=1200&height=800&nologo=true"
+    Image URLs will be fetched automatically via Unsplash API based on the destination names you provide.
+    You do NOT need to generate image URLs manually.
     
     Ensure the user returns home at the end.\n\nCONVERSATION:\n${historyText}`,
     config: {
@@ -195,12 +207,15 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
   const tripData = extractJson(response.text);
   if (!tripData) return null;
 
-  // Validation
-  const isValidUrl = (url: string) =>
-    url && url.includes('http') && !url.includes('source.unsplash.com');
+  // UNSPLASH API INTEGRATION (Chat)
+  const mainDestination = tripData.destination || "Travel";
+  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
+  const searchCheck = englishOnly.length > 2 ? englishOnly : mainDestination;
+  const searchQuery = searchCheck + " travel landmark";
 
-  let finalImage = tripData.imageUrl;
-  if (!isValidUrl(finalImage)) {
+  let finalImage = await UnsplashService.searchPhoto(searchQuery);
+
+  if (!finalImage) {
     finalImage = `https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80`;
   }
 
