@@ -109,7 +109,12 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
     3. The code will automatically fetch high-quality photos using the Unsplash API based on this English name.
     4. You do NOT need to generate image URLs manually. Leave 'imageUrl' empty or providing a generic description.
     
-    ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.`,
+    ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.
+    
+    CRITICAL INSTRUCTION:
+    1. 'englishDestinationName': MUST be the English name of the main city (e.g. if 'Львів' -> return 'Lviv').
+    2. Image URLs: Leave empty, code will fetch them using the English name.
+    `,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       tools: [],
@@ -123,10 +128,9 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
   // UNSPLASH API INTEGRATION
   const mainDestination = tripData.destination || request.destinations[0] || "Travel";
 
-  // Clean query for Unsplash (English preferred)
-  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
-  const searchCheck = englishOnly.length > 2 ? englishOnly : mainDestination;
-  const searchQuery = searchCheck + " travel landmark";
+  // Use the AI-provided English name for reliable search
+  const searchName = tripData.englishDestinationName || mainDestination;
+  const searchQuery = searchName + " travel landmark";
 
   // Fetch cover image
   let finalImage = await UnsplashService.searchPhoto(searchQuery);
@@ -142,9 +146,9 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
 
   // Fetch images in parallel for speed
   const imagePromises = destinationsToFetch.map(async (dest) => {
-    const q = dest.replace(/[^a-zA-Z\s-]/g, '').trim();
-    const finalQ = (q.length > 2 ? q : dest) + " city travel";
-    return await UnsplashService.searchPhoto(finalQ);
+    // If the destination in request is non-English, try to use the AI's English suggestion for at least one
+    const query = (dest === tripData.destination && tripData.englishDestinationName) ? tripData.englishDestinationName : dest;
+    return await UnsplashService.searchPhoto(query + " city travel");
   });
 
   const fetchedImages = await Promise.all(imagePromises);
@@ -209,9 +213,8 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
 
   // UNSPLASH API INTEGRATION (Chat)
   const mainDestination = tripData.destination || "Travel";
-  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
-  const searchCheck = englishOnly.length > 2 ? englishOnly : mainDestination;
-  const searchQuery = searchCheck + " travel landmark";
+  const searchName = tripData.englishDestinationName || mainDestination;
+  const searchQuery = searchName + " travel landmark";
 
   let finalImage = await UnsplashService.searchPhoto(searchQuery);
 

@@ -27,6 +27,7 @@ export interface Trip {
   name: string;
   departureLocation: string;
   destination: string;
+  englishDestinationName?: string; // For image search
   startDate: string;
   endDate: string;
   summary: string;
