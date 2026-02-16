@@ -99,7 +99,14 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
     Travelers: ${request.travelers}.
     USER GOALS: ${request.goals}
     
-    ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Use Google Search to find working booking links for the specified dates across reliable carriers.`,
+    CRITICAL IMAGE INSTRUCTION:
+    1. Identify the MAIN destination.
+    2. Convert the destination name to ENGLISH (e.g. if 'Львів' -> 'Lviv', if 'Київ' -> 'Kyiv').
+    3. Use Google Search to find a high-quality, direct image URL for this destination using the English name.
+    4. PREFERRED SOURCES: Wikimedia Commons (upload.wikimedia.org...), Pexels, or direct 'images.unsplash.com' links.
+    5. FORBIDDEN: Do NOT use 'source.unsplash.com' (it is broken).
+    
+    ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       tools: [{ googleSearch: {} }],
@@ -154,7 +161,15 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
-    contents: `Based on the conversation, generate a full JSON itinerary. Ensure the user returns home at the end.\n\nCONVERSATION:\n${historyText}`,
+    contents: `Based on the conversation, generate a full JSON itinerary.
+    
+    CRITICAL IMAGE INSTRUCTION:
+    1. Identify the MAIN destination from the conversation.
+    2. Convert the name to ENGLISH if needed.
+    3. Use Google Search to find a valid direct image URL (from Wikimedia, Pixabay, Pexels, or direct Unsplash/Flickr).
+    4. FORBIDDEN: Do NOT use 'source.unsplash.com' (broken).
+    
+    Ensure the user returns home at the end.\n\nCONVERSATION:\n${historyText}`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       tools: [{ googleSearch: {} }],
