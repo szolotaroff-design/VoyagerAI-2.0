@@ -104,14 +104,16 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
     Format: "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20[DESTINATION_ENGLISH_NAME]%20landmark,%20sunny%20day?width=1200&height=800&nologo=true"
     
     1. Identify the MAIN destination.
-    2. Translate it to ENGLISH (e.g. 'Львів' -> 'Lviv').
-    3. Insert the English name into the URL template above.
+    2. Translate the destination name to ENGLISH (e.g. 'Львів' -> 'Lviv').
+    3. Use the 'googleSearch' tool to find a HIGH-QUALITY, REAL photographic image URL for this destination.
+    4. Search query format: "[Destination Name] travel photography high resolution site:unsplash.com OR site:wikimedia.org OR site:pexels.com"
+    5. Select a direct image link ending in .jpg, .png, or starting with 'https://images.unsplash.com/'.
+    6. FORBIDDEN: Do NOT use 'source.unsplash.com' links.
     
-    Examples:
     ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
-      tools: [],
+      tools: [{ googleSearch: {} }],
       responseMimeType: "application/json",
       responseSchema: tripSchema
     }
@@ -119,34 +121,24 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
   const tripData = extractJson(response.text);
   if (!tripData) throw new Error("Failed to generate trip plan.");
 
-  // FORCE DYNAMIC IMAGE GENERATION IN CODE (reliable fallback)
-  const mainDestination = tripData.destination || request.destinations[0] || "Travel";
-
-  // Try to extract English-like characters to help image generation (some models struggle with Cyrillic prompts in URLs)
-  // If the result is too short (e.g. was purely Cyrillic), revert to the original string.
-  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
-  const safeQuery = englishOnly.length > 2 ? englishOnly : mainDestination;
-
-  const generateImageUrl = (query: string) => {
-    // Determine safe query for this specific call
-    const cleanQ = query.replace(/[^a-zA-Z\s-]/g, '').trim();
-    const finalQ = cleanQ.length > 2 ? cleanQ : query;
-    return `https://image.pollinations.ai/prompt/travel%20photo%20of%20${encodeURIComponent(finalQ)}%20landmark,%20sunny%20day?width=1200&height=800&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
-  };
-
-  // 1. Primary Image
+  // Fallback behavior: Use AI provided URL. If missing/broken, use a safe default.
+  // We accept Unsplash direct links (images.unsplash.com) but reject source.unsplash.com
   let finalImage = tripData.imageUrl;
-  // If invalid, missing, or Unsplash (unreliable), replace it.
-  if (!finalImage || !finalImage.includes('http') || finalImage.includes('unsplash.com')) {
-    finalImage = generateImageUrl(safeQuery);
+
+  const isValidUrl = (url: string) =>
+    url && url.includes('http') && !url.includes('source.unsplash.com');
+
+  if (!isValidUrl(finalImage)) {
+    // If AI failed to find a real link via search, use a generic reliable travel placeholder
+    // keeping it neutral so it doesn't look like a fake generated glitch
+    finalImage = `https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80`;
   }
 
-  // 2. Destination Images (Gallery)
-  let finalDestImages = tripData.destinationImages || [];
-  if (finalDestImages.length === 0 || !finalDestImages[0].includes('http') || finalDestImages.some(img => img.includes('unsplash.com'))) {
-    const destinationsToUse = request.destinations.length > 0 ? request.destinations : [mainDestination];
-    finalDestImages = destinationsToUse.map(d => generateImageUrl(d));
-  }
+  // Filter gallery images
+  const finalDestImages = (tripData.destinationImages || [])
+    .filter((img: string) => isValidUrl(img));
+
+  if (finalDestImages.length === 0) finalDestImages.push(finalImage);
 
   return { ...tripData, imageUrl: finalImage, destinationImages: finalDestImages, id: crypto.randomUUID(), sources: [], editCount: 0 };
 };
@@ -199,26 +191,17 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
       responseSchema: tripSchema,
     }
   });
+
   const tripData = extractJson(response.text);
   if (!tripData) return null;
 
-  // FORCE GENERATION:
-  const mainDestination = tripData.destination || "Travel";
-
-  // Try to extract English-like characters to help image generation (some models struggle with Cyrillic prompts in URLs)
-  // If the result is too short (e.g. was purely Cyrillic), revert to the original string.
-  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
-  const safeQuery = englishOnly.length > 2 ? englishOnly : mainDestination;
-
-  const generateImageUrl = (query: string) => {
-    const cleanQ = query.replace(/[^a-zA-Z\s-]/g, '').trim();
-    const finalQ = cleanQ.length > 2 ? cleanQ : query;
-    return `https://image.pollinations.ai/prompt/travel%20photo%20of%20${encodeURIComponent(finalQ)}%20landmark,%20sunny%20day?width=1200&height=800&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
-  };
+  // Validation
+  const isValidUrl = (url: string) =>
+    url && url.includes('http') && !url.includes('source.unsplash.com');
 
   let finalImage = tripData.imageUrl;
-  if (!finalImage || !finalImage.includes('http') || finalImage.includes('unsplash.com')) {
-    finalImage = generateImageUrl(safeQuery);
+  if (!isValidUrl(finalImage)) {
+    finalImage = `https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80`;
   }
 
   return {
