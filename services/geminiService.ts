@@ -120,24 +120,30 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
   if (!tripData) throw new Error("Failed to generate trip plan.");
 
   // FORCE DYNAMIC IMAGE GENERATION IN CODE (reliable fallback)
-  // If AI fails/hallucinates, we construct the URL ourselves using the request data
   const mainDestination = tripData.destination || request.destinations[0] || "Travel";
-  const cleanDestination = mainDestination.split(',')[0].replace(/[^a-zA-Z\s]/g, '').trim(); // Try to keep only English chars if possible, but Pollinations handles utf8 okay mostly. 
-  // Better: use the AI's "english" idea if present, or just raw string.
 
-  const generateImageUrl = (query: string) =>
-    `https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20${encodeURIComponent(query)}%20landmark,%20sunny%20day,%20high%20quality?width=1200&height=800&nologo=true&model=flux`;
+  // Try to extract English-like characters to help image generation (some models struggle with Cyrillic prompts in URLs)
+  // If the result is too short (e.g. was purely Cyrillic), revert to the original string.
+  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
+  const safeQuery = englishOnly.length > 2 ? englishOnly : mainDestination;
+
+  const generateImageUrl = (query: string) => {
+    // Determine safe query for this specific call
+    const cleanQ = query.replace(/[^a-zA-Z\s-]/g, '').trim();
+    const finalQ = cleanQ.length > 2 ? cleanQ : query;
+    return `https://image.pollinations.ai/prompt/travel%20photo%20of%20${encodeURIComponent(finalQ)}%20landmark,%20sunny%20day?width=1200&height=800&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
+  };
 
   // 1. Primary Image
   let finalImage = tripData.imageUrl;
+  // If invalid, missing, or Unsplash (unreliable), replace it.
   if (!finalImage || !finalImage.includes('http') || finalImage.includes('unsplash.com')) {
-    finalImage = generateImageUrl(mainDestination);
+    finalImage = generateImageUrl(safeQuery);
   }
 
   // 2. Destination Images (Gallery)
   let finalDestImages = tripData.destinationImages || [];
-  if (finalDestImages.length === 0 || !finalDestImages[0].includes('http')) {
-    // Generate images for each destination in the request if AI failed
+  if (finalDestImages.length === 0 || !finalDestImages[0].includes('http') || finalDestImages.some(img => img.includes('unsplash.com'))) {
     const destinationsToUse = request.destinations.length > 0 ? request.destinations : [mainDestination];
     finalDestImages = destinationsToUse.map(d => generateImageUrl(d));
   }
@@ -198,12 +204,21 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
 
   // FORCE GENERATION:
   const mainDestination = tripData.destination || "Travel";
-  const generateImageUrl = (query: string) =>
-    `https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20${encodeURIComponent(query)}%20landmark,%20sunny%20day,%20high%20quality?width=1200&height=800&nologo=true&model=flux`;
+
+  // Try to extract English-like characters to help image generation (some models struggle with Cyrillic prompts in URLs)
+  // If the result is too short (e.g. was purely Cyrillic), revert to the original string.
+  const englishOnly = mainDestination.replace(/[^a-zA-Z\s-]/g, '').trim();
+  const safeQuery = englishOnly.length > 2 ? englishOnly : mainDestination;
+
+  const generateImageUrl = (query: string) => {
+    const cleanQ = query.replace(/[^a-zA-Z\s-]/g, '').trim();
+    const finalQ = cleanQ.length > 2 ? cleanQ : query;
+    return `https://image.pollinations.ai/prompt/travel%20photo%20of%20${encodeURIComponent(finalQ)}%20landmark,%20sunny%20day?width=1200&height=800&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
+  };
 
   let finalImage = tripData.imageUrl;
   if (!finalImage || !finalImage.includes('http') || finalImage.includes('unsplash.com')) {
-    finalImage = generateImageUrl(mainDestination);
+    finalImage = generateImageUrl(safeQuery);
   }
 
   return {
