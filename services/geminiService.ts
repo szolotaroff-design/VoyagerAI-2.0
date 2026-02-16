@@ -100,29 +100,34 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
     USER GOALS: ${request.goals}
     
     CRITICAL IMAGE INSTRUCTION:
+    Since Unsplash direct links are unreliable, you MUST use the following dynamic image generator for 'imageUrl' and 'destinationImages'.
+    Format: "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20[DESTINATION_ENGLISH_NAME]%20landmark,%20sunny%20day?width=1200&height=800&nologo=true"
+    
     1. Identify the MAIN destination.
-    2. Convert the destination name to ENGLISH (e.g. if 'Львів' -> 'Lviv', if 'Київ' -> 'Kyiv').
-    3. Use Google Search to find a high-quality, direct image URL for this destination using the English name.
-    4. PREFERRED SOURCES: Wikimedia Commons (upload.wikimedia.org...), Pexels, or direct 'images.unsplash.com' links.
-    5. FORBIDDEN: Do NOT use 'source.unsplash.com' (it is broken).
+    2. Translate it to ENGLISH (e.g. 'Львів' -> 'Lviv').
+    3. Insert the English name into the URL template above.
+    
+    Examples:
+    - Kyiv -> "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20Kyiv%20Ukraine%20landmark,%20sunny%20day?width=1200&height=800&nologo=true"
+    - Paris -> "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20Paris%20Eiffel%20Tower,%20sunny%20day?width=1200&height=800&nologo=true"
     
     ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
-      tools: [{ googleSearch: {} }],
+      tools: [], // Google Search not strictly needed for this image strategy, but kept if you want real booking links (optional)
       responseMimeType: "application/json",
       responseSchema: tripSchema
     }
   });
   const tripData = extractJson(response.text);
   if (!tripData) throw new Error("Failed to generate trip plan.");
-  let finalImage = tripData.imageUrl;
-  if (finalImage && finalImage.includes('source.unsplash.com')) {
-    finalImage = null; // Force fallback for deprecated service
-  }
-  finalImage = finalImage || `https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80`;
+
+  // Fallback if AI fails to follow the strictly formatted URL
+  const defaultImage = `https://image.pollinations.ai/prompt/travel%20map%20planning?width=1200&height=800&nologo=true`;
+  const finalImage = (tripData.imageUrl && tripData.imageUrl.includes('http')) ? tripData.imageUrl : defaultImage;
+
   const finalDestImages = (tripData.destinationImages || [finalImage])
-    .filter((img: string) => img && img.trim().length > 0 && img.startsWith('http'));
+    .filter((img: string) => img && img.includes('http'));
 
   return { ...tripData, imageUrl: finalImage, destinationImages: finalDestImages, id: crypto.randomUUID(), sources: [], editCount: 0 };
 };
@@ -164,15 +169,13 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
     contents: `Based on the conversation, generate a full JSON itinerary.
     
     CRITICAL IMAGE INSTRUCTION:
-    1. Identify the MAIN destination from the conversation.
-    2. Convert the name to ENGLISH if needed.
-    3. Use Google Search to find a valid direct image URL (from Wikimedia, Pixabay, Pexels, or direct Unsplash/Flickr).
-    4. FORBIDDEN: Do NOT use 'source.unsplash.com' (broken).
+    Use the dynamic image generator for 'imageUrl':
+    Format: "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20[DESTINATION_ENGLISH_NAME]%20landmark,%20sunny%20day?width=1200&height=800&nologo=true"
     
     Ensure the user returns home at the end.\n\nCONVERSATION:\n${historyText}`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
-      tools: [{ googleSearch: {} }],
+      tools: [],
       responseMimeType: "application/json",
       responseSchema: tripSchema,
     }
@@ -181,10 +184,13 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
   const tripData = extractJson(response.text);
   if (!tripData) return null;
 
+  const defaultImage = `https://image.pollinations.ai/prompt/travel%20planning%20map?width=1200&height=800&nologo=true`;
+  const finalImage = (tripData.imageUrl && tripData.imageUrl.includes('http')) ? tripData.imageUrl : defaultImage;
+
   return {
     ...tripData,
     id: crypto.randomUUID(),
-    imageUrl: (tripData.imageUrl && !tripData.imageUrl.includes('source.unsplash.com')) ? tripData.imageUrl : `https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80`,
+    imageUrl: finalImage,
     sources: [],
     editCount: 0
   };
