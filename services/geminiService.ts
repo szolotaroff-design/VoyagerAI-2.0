@@ -108,13 +108,10 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
     3. Insert the English name into the URL template above.
     
     Examples:
-    - Kyiv -> "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20Kyiv%20Ukraine%20landmark,%20sunny%20day?width=1200&height=800&nologo=true"
-    - Paris -> "https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20Paris%20Eiffel%20Tower,%20sunny%20day?width=1200&height=800&nologo=true"
-    
     ACTION: Ensure the trip ends with a return to ${request.departureLocation}. Generate the full JSON plan.`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
-      tools: [], // Google Search not strictly needed for this image strategy, but kept if you want real booking links (optional)
+      tools: [],
       responseMimeType: "application/json",
       responseSchema: tripSchema
     }
@@ -122,12 +119,28 @@ export const generateTripPlan = async (request: TripRequest): Promise<Trip> => {
   const tripData = extractJson(response.text);
   if (!tripData) throw new Error("Failed to generate trip plan.");
 
-  // Fallback if AI fails to follow the strictly formatted URL
-  const defaultImage = `https://image.pollinations.ai/prompt/travel%20map%20planning?width=1200&height=800&nologo=true`;
-  const finalImage = (tripData.imageUrl && tripData.imageUrl.includes('http')) ? tripData.imageUrl : defaultImage;
+  // FORCE DYNAMIC IMAGE GENERATION IN CODE (reliable fallback)
+  // If AI fails/hallucinates, we construct the URL ourselves using the request data
+  const mainDestination = tripData.destination || request.destinations[0] || "Travel";
+  const cleanDestination = mainDestination.split(',')[0].replace(/[^a-zA-Z\s]/g, '').trim(); // Try to keep only English chars if possible, but Pollinations handles utf8 okay mostly. 
+  // Better: use the AI's "english" idea if present, or just raw string.
 
-  const finalDestImages = (tripData.destinationImages || [finalImage])
-    .filter((img: string) => img && img.includes('http'));
+  const generateImageUrl = (query: string) =>
+    `https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20${encodeURIComponent(query)}%20landmark,%20sunny%20day,%20high%20quality?width=1200&height=800&nologo=true&model=flux`;
+
+  // 1. Primary Image
+  let finalImage = tripData.imageUrl;
+  if (!finalImage || !finalImage.includes('http') || finalImage.includes('unsplash.com')) {
+    finalImage = generateImageUrl(mainDestination);
+  }
+
+  // 2. Destination Images (Gallery)
+  let finalDestImages = tripData.destinationImages || [];
+  if (finalDestImages.length === 0 || !finalDestImages[0].includes('http')) {
+    // Generate images for each destination in the request if AI failed
+    const destinationsToUse = request.destinations.length > 0 ? request.destinations : [mainDestination];
+    finalDestImages = destinationsToUse.map(d => generateImageUrl(d));
+  }
 
   return { ...tripData, imageUrl: finalImage, destinationImages: finalDestImages, id: crypto.randomUUID(), sources: [], editCount: 0 };
 };
@@ -180,12 +193,18 @@ export const finalizeTripFromChat = async (history: ChatMessage[]): Promise<Trip
       responseSchema: tripSchema,
     }
   });
-
   const tripData = extractJson(response.text);
   if (!tripData) return null;
 
-  const defaultImage = `https://image.pollinations.ai/prompt/travel%20planning%20map?width=1200&height=800&nologo=true`;
-  const finalImage = (tripData.imageUrl && tripData.imageUrl.includes('http')) ? tripData.imageUrl : defaultImage;
+  // FORCE GENERATION:
+  const mainDestination = tripData.destination || "Travel";
+  const generateImageUrl = (query: string) =>
+    `https://image.pollinations.ai/prompt/cinematic%20travel%20photo%20of%20${encodeURIComponent(query)}%20landmark,%20sunny%20day,%20high%20quality?width=1200&height=800&nologo=true&model=flux`;
+
+  let finalImage = tripData.imageUrl;
+  if (!finalImage || !finalImage.includes('http') || finalImage.includes('unsplash.com')) {
+    finalImage = generateImageUrl(mainDestination);
+  }
 
   return {
     ...tripData,
